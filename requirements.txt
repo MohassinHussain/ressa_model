@@ -1,0 +1,8 @@
+requests
+duckduckgo-search
+beautifulsoup4
+sentence-transformers
+googlesearch-python
+joblib
+flask
+flask_cors
