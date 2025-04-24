@@ -6,3 +6,4 @@ googlesearch-python
 joblib
 flask
 flask_cors
+gunicorn
