@@ -2,9 +2,9 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from main import get_all_resources
 
-import os
+# import os
 
-port = int(os.environ.get("PORT", 5000))
+# port = int(os.environ.get("PORT", 5000))
 
 
 app = Flask(__name__)
@@ -27,4 +27,4 @@ def home():
     return jsonify({"message": "Use POST Method"})
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0")

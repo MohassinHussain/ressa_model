@@ -1,9 +1,6 @@
-requests
-duckduckgo-search
-beautifulsoup4
-sentence-transformers
-googlesearch-python
-joblib
 flask
 flask_cors
-gunicorn
+requests
+duckduckgo_search
+beautifulsoup4
+scikit-learn

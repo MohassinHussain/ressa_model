@@ -1,15 +1,32 @@
 import requests
 from duckduckgo_search import DDGS
 from bs4 import BeautifulSoup
-from sentence_transformers import SentenceTransformer, util
-from googlesearch import search as g_search
-import joblib
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 
-model = SentenceTransformer('all-MiniLM-L6-v2')
 
-def get_search_results(topic, max_results=15):
+#caching
+# import json
+# import os
+
+# CACHE_FILE = "cache.json"
+
+# # Load cache
+# if os.path.exists(CACHE_FILE):
+#     with open(CACHE_FILE, "r") as f:
+#         cache = json.load(f)
+# else:
+#     cache = {}
+
+# def save_cache():
+#     with open(CACHE_FILE, "w") as f:
+#         json.dump(cache, f, indent=2)
+
+
+
+def get_search_results(topic, max_results=10):
     results = []
     with DDGS() as ddgs:
         for r in ddgs.text(topic, max_results=max_results):
@@ -25,154 +42,111 @@ def get_text_from_url(url):
     except:
         return ""
 
-def rank_results(topic, results):
-    topic_embedding = model.encode(topic, convert_to_tensor=True)
-    ranked = []
+def rank_results_tfidf(topic, results):
+    texts = [get_text_from_url(res['link']) for res in results]
+    
+    valid_results = []
+    content_texts = []
+    
+    for res, text in zip(results, texts):
+        if text.strip():
+            res['summary'] = text[:300]
+            valid_results.append(res)
+            content_texts.append(text)
 
-    for res in results:
-        content = get_text_from_url(res['link'])
-        if content:
-            content_embedding = model.encode(content, convert_to_tensor=True)
-            score = util.pytorch_cos_sim(topic_embedding, content_embedding).item()
-            res['score'] = score
-            res['summary'] = content[:300]
-            ranked.append(res)
+    if not content_texts:
+        return []
 
-    return sorted(ranked, key=lambda x: x['score'], reverse=True)
+    vectorizer = TfidfVectorizer(stop_words='english')
+    vectors = vectorizer.fit_transform([topic] + content_texts)
+
+    topic_vec = vectors[0]
+    content_vecs = vectors[1:]
+
+    similarities = cosine_similarity(topic_vec, content_vecs).flatten()
+
+    for i, score in enumerate(similarities):
+        valid_results[i]['score'] = score
+
+    return sorted(valid_results, key=lambda x: x['score'], reverse=True)
 
 def get_images(topic):
     with DDGS() as ddgs:
         return [{"image": r["image"], "title": r["title"]} for r in ddgs.images(topic, max_results=7)]
 
-def get_videos(topic, max_results=5):
+def get_videos(topic, max_results=7):
     with DDGS() as ddgs:
         results = ddgs.text(f"{topic} site:youtube.com", max_results=max_results)
 
         videos = []
-
-
-        # print("Raw search results:")
-        # print(results)
-
         for r in results:
-
             title = r.get("title", "")
             description = r.get("body", "")
             url = r.get("href", "")
-            r.get("upload")
-
-# Get Upload time by scraping
             upload_time = ""
+
             try:
                 response = requests.get(url)
                 soup = BeautifulSoup(response.text, 'html.parser')
-
-                # Look for upload date in meta tags
                 date_tag = soup.find("meta", itemprop="uploadDate")
                 if date_tag:
-                    upload_time = date_tag["content"]  # Format: '2023-06-15'
+                    upload_time = date_tag["content"]
             except Exception as e:
                 print(f"Error fetching upload date: {e}")
 
-
-            # Print each result for inspection
-            # print(f"Result: {r}")
-            # if upload_time and datetime.strptime(upload_time, '%Y-%m-%dT%H:%M:%S%z') > datetime(2024, 1, 1):
             videos.append({
-                "title": title, "href": url, "body": description, "upload_time": upload_time
+                "title": title,
+                "href": url,
+                "body": description,
+                "upload_time": upload_time
             })
-
-            # Only append to videos list if the URL is a valid YouTube link
-            # if title and url and "youtube.com/watch" in url:
-            #     videos.append({
-            #         "title": title,
-            #         "description": description,
-            #         "url": url
-            #     })
 
         return videos
 
-
-
-
-# def get_videos(topic, max_results=5):
-#     videos = []
-#     with DDGS() as ddgs:
-#         for result in ddgs.videos(topic, max_results=max_results):
-#             url = result.get("url", "")
-#             if "youtube.com/watch" in url:
-#                 videos.append({
-#                     "title": result.get("title", "YouTube Video"),
-#                     "description": result.get("content", ""),
-#                     "url": url
-#                 })
-#     return videos
-
-# def get_videos(topic, max_results=5):
-#     query = f"{topic} site:youtube.com"
-#     videos = []
-#     try:
-#         links = g_search(query)
-#         for link in links:
-#             if "youtube.com/watch" in link:
-#                 videos.append({
-#                     "title": "YouTube Video",
-#                     "description": "",
-#                     "url": link
-#                 })
-#             time.sleep(2)  # add delay to avoid 429
-#     except Exception as e:
-#         print("Error:", e)
-#     return videos
-
-
-
 def get_links(topic):
+    time.sleep(2)
     results = get_search_results(topic)
     return [r['link'] for r in results]
 
-
 def get_text(topic):
     results = get_search_results(topic)
-    ranked = rank_results(topic, results)
+    ranked = rank_results_tfidf(topic, results)
     return ranked
 
 def get_all_resources(topic):
-    return {
-        "topic": topic,
+    # if topic in cache:
+    #     print(f"Using cached result for: {topic}")
+    #     return cache[topic]
+    # print(f"🔍 Fetching new results for: {topic}")
+    
+    data = {
+        "topic": topic, 
         "links": get_links(topic),
         "articles": get_text(topic),
         "images": get_images(topic),
         "videos": get_videos(topic),
     }
+    # cache[topic] = data
+    # save_cache()
+    return data
 
-resources = get_all_resources("Flutter")
 
-# print(resources)
+resources = get_all_resources("Learning habits")
 
-# print("\n*******ARTICLES*****\n")
-
+# print("\n******* ARTICLES *******\n")
 # for article in resources["articles"]:
 #     print(f"\n🔗 {article['title']} ({article['score']:.2f})")
 #     print(f"URL: {article['link']}")
 #     print(f"Summary: {article['summary']}")
 
-
-# print("\n*****IMAGES*****\n")
-
+# print("\n******* IMAGES *******\n")
 # for img in resources['images']:
 #     print(f"\nTitle: {img['title']}")
 #     print(f"URL: {img['image']}")
 
-# print("\n*****VIDEOS*****\n")
-
+# print("\n******* VIDEOS *******\n")
 # for video in resources['videos']:
 #     print(f"\nTitle: {video['title']}")
-#     print(f"URL for Video: {video['href']}")
+#     print(f"URL: {video['href']}")
 #     print(f"Desc: {video['body']}")
 #     print(f"Upload Time: {video['upload_time']}")
-
-
-
-# joblib.dump(model, 'model.pkl')
-
